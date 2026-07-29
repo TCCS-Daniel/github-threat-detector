@@ -1,0 +1,33 @@
+# Secrets / local env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+*credentials*
+*secret*.json
+!.github/**
+
+# Deploy local overrides
+deploy/aws.env
+**/.deploy.secrets.json
+.aws/
+samconfig.toml
+**/samconfig.toml
+
+# Python / UI / SAM
+.venv/
+.venv-*/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+ui/node_modules/
+ui/dist/
+webhook/.aws-sam/
+
+# Local-only
+backups/

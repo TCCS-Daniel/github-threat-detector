@@ -1,0 +1,247 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: GitHub webhook receiver. Lambda Function URL writes events into RDS Postgres.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID (use your default VPC).
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Two or more subnets in the same VPC (for the RDS subnet group).
+  DBUsername:
+    Type: String
+    Default: gtduser
+    MinLength: 4
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_]*'
+  DBPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    Description: Master password for RDS Postgres (32+ chars).
+  DBPort:
+    Type: Number
+    Default: 54321
+    MinValue: 1150
+    MaxValue: 65535
+    Description: Postgres listener port. Avoid 5432 to reduce drive-by scanner noise.
+  DBName:
+    Type: String
+    Default: threat_detector
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_]*'
+  WebhookSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: Shared secret to configure in GitHub webhook settings.
+  GitHubToken:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: GitHub PAT for snapshot collection (repo + read:org scopes).
+  TargetRepos:
+    Type: String
+    Default: ''
+    Description: Optional comma-separated owner/repo added to org discovery list.
+  TargetOrgs:
+    Type: String
+    Default: supplychain-labs
+    Description: Comma-separated orgs to discover repositories from.
+  TargetRepoPrefix:
+    Type: String
+    Default: ''
+    Description: Optional prefix filter for org repo discovery. Empty means every repo in the org.
+  SnapshotSchedule:
+    Type: String
+    Default: rate(3 minutes)
+    Description: EventBridge schedule expression for SnapshotCollector.
+  ForensicsSchedule:
+    Type: String
+    Default: rate(5 minutes)
+    Description: EventBridge schedule expression for GitForensicsCollector.
+  EnrichmentSchedule:
+    Type: String
+    Default: rate(5 minutes)
+    Description: EventBridge schedule expression for AuthorEnrichmentCollector.
+
+Resources:
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnets for webhook RDS
+      SubnetIds: !Ref SubnetIds
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Public Postgres access for webhook receiver (playground)
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref DBPort
+          ToPort: !Ref DBPort
+          CidrIp: 0.0.0.0/0
+
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      Engine: postgres
+      EngineVersion: '16'
+      DBInstanceClass: db.t4g.micro
+      AllocatedStorage: 20
+      StorageType: gp3
+      DBName: !Ref DBName
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      Port: !Ref DBPort
+      PubliclyAccessible: true
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DBSecurityGroup
+      BackupRetentionPeriod: 0
+      MultiAZ: false
+      AutoMinorVersionUpgrade: true
+
+  WebhookReceiver:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: handler.lambda_handler
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      MemorySize: 256
+      Timeout: 10
+      Environment:
+        Variables:
+          DATABASE_URL: !Sub 'postgresql://${DBUsername}:${DBPassword}@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${DBName}'
+          GITHUB_WEBHOOK_SECRET: !Ref WebhookSecret
+      FunctionUrlConfig:
+        AuthType: NONE
+
+  GitHubTokenSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${AWS::StackName}/github-token'
+      Description: GitHub PAT for snapshot collection
+      SecretString: !Ref GitHubToken
+
+  SnapshotCollector:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Architectures:
+        - arm64
+      MemorySize: 512
+      Timeout: 300
+      Environment:
+        Variables:
+          DATABASE_URL: !Sub 'postgresql://${DBUsername}:${DBPassword}@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${DBName}'
+          GITHUB_TOKEN_SECRET_ARN: !Ref GitHubTokenSecret
+          TARGET_REPOS: !Ref TargetRepos
+          TARGET_ORGS: !Ref TargetOrgs
+          TARGET_REPO_PREFIX: !Ref TargetRepoPrefix
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: !Ref GitHubTokenSecret
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref SnapshotSchedule
+            Description: Snapshot repo config and emit drift events
+            Enabled: true
+    Metadata:
+      Dockerfile: lambdas/snapshot/Dockerfile
+      DockerContext: ..
+      DockerTag: latest
+
+  GitForensicsCollector:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Architectures:
+        - arm64
+      MemorySize: 2048
+      Timeout: 600
+      EphemeralStorage:
+        Size: 4096
+      Environment:
+        Variables:
+          DATABASE_URL: !Sub 'postgresql://${DBUsername}:${DBPassword}@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${DBName}'
+          GITHUB_TOKEN_SECRET_ARN: !Ref GitHubTokenSecret
+          TARGET_REPOS: !Ref TargetRepos
+          TARGET_ORGS: !Ref TargetOrgs
+          TARGET_REPO_PREFIX: !Ref TargetRepoPrefix
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: !Ref GitHubTokenSecret
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref ForensicsSchedule
+            Description: Deep git-clone forensics scan
+            Enabled: true
+    Metadata:
+      Dockerfile: lambdas/forensics/Dockerfile
+      DockerContext: ..
+      DockerTag: latest
+
+  AuthorEnrichmentCollector:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Architectures:
+        - arm64
+      MemorySize: 512
+      Timeout: 300
+      Environment:
+        Variables:
+          DATABASE_URL: !Sub 'postgresql://${DBUsername}:${DBPassword}@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${DBName}'
+          GITHUB_TOKEN_SECRET_ARN: !Ref GitHubTokenSecret
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: !Ref GitHubTokenSecret
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref EnrichmentSchedule
+            Description: Cross-owner forged-author enrichment via GitHub commit search
+            Enabled: true
+    Metadata:
+      Dockerfile: lambdas/enrich/Dockerfile
+      DockerContext: ..
+      DockerTag: latest
+
+Outputs:
+  WebhookUrl:
+    Description: Payload URL to paste into GitHub webhook settings
+    Value: !GetAtt WebhookReceiverUrl.FunctionUrl
+  DatabaseEndpoint:
+    Description: RDS endpoint (psql DSN without password)
+    Value: !Sub 'postgresql://${DBUsername}@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${DBName}'
+  DBInstanceIdentifier:
+    Description: RDS instance ID
+    Value: !Ref DBInstance
+  SnapshotCollectorFunction:
+    Description: Snapshot collector Lambda name
+    Value: !Ref SnapshotCollector
+  GitHubTokenSecretArn:
+    Description: ARN of the Secrets Manager secret holding the GitHub PAT
+    Value: !Ref GitHubTokenSecret
+  GitForensicsCollectorFunction:
+    Description: Git forensics Lambda name
+    Value: !Ref GitForensicsCollector
+  AuthorEnrichmentCollectorFunction:
+    Description: Author enrichment Lambda name
+    Value: !Ref AuthorEnrichmentCollector
