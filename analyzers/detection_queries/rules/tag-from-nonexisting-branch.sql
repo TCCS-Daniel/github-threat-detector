@@ -1,5 +1,5 @@
 -- id: tag-from-nonexisting-branch
--- severity: high
+-- severity: medium
 -- description: Tag '{tag}' resolves to a commit on no existing branch — tag from non-existing branch
 -- tactic: Initial Access
 -- event_id: {repo_name}:{tag}
