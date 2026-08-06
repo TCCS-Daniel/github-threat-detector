@@ -1,0 +1,15 @@
+# Oneshot trigger for the collect + analyze pipeline. Fired by
+# threat-detector-run.timer; can also be run manually:
+#   systemctl start threat-detector-run
+# POST /api/run returns immediately; the job executes inside the API process
+# (watch it via the UI or GET /api/run/status). If a run is already in
+# progress the API responds with started:false and nothing overlaps.
+
+[Unit]
+Description=Trigger GitHub Threat Detector collect + analyze run
+Wants=threat-detector.service
+After=threat-detector.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/curl --silent --show-error --fail --max-time 30 -X POST http://127.0.0.1:8000/api/run

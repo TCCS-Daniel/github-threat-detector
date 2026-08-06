@@ -19,6 +19,10 @@ def _run_git(args: list[str], cwd: str) -> subprocess.CompletedProcess:
         cwd=cwd,
         capture_output=True,
         text=True,
+        # Repo content isn't guaranteed to be UTF-8 (e.g. Windows-1252 bytes
+        # in old commits); don't let one bad byte abort the inspection.
+        encoding="utf-8",
+        errors="replace",
         timeout=GIT_CLONE_TIMEOUT,
     )
 

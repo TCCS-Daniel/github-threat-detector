@@ -1,7 +1,7 @@
 import type { Finding, RelatedResponse, Severity, TimelineResponse } from './types'
 
-async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url)
+async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init)
   const body = await res.text()
   if (!res.ok) {
     throw new Error(`${res.status} ${res.statusText}: ${body.slice(0, 200)}`)
@@ -13,6 +13,28 @@ async function getJson<T>(url: string): Promise<T> {
     )
   }
   return JSON.parse(body) as T
+}
+
+function getJson<T>(url: string): Promise<T> {
+  return requestJson<T>(url)
+}
+
+export type RunStatus = {
+  status: 'idle' | 'running' | 'done' | 'error'
+  step: 'collect' | 'analyze' | null
+  detail: string | null
+  started_at: string | null
+  finished_at: string | null
+  error: string | null
+  result: Record<string, number> | null
+}
+
+export function startRun() {
+  return requestJson<RunStatus & { started: boolean }>('/api/run', { method: 'POST' })
+}
+
+export function fetchRunStatus() {
+  return getJson<RunStatus>('/api/run/status')
 }
 
 export function fetchOrgs() {

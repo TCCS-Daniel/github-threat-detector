@@ -1,24 +1,68 @@
 from __future__ import annotations
 
+import logging
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-from api import queries
+from api import queries, run
 
-app = FastAPI(title="GitHub Threat Detector Investigation API", version="0.1.0")
+logger = logging.getLogger("api")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Best-effort schema apply so a fresh database works out of the box.
+    try:
+        from db.client import apply_schema
+
+        apply_schema()
+    except Exception as exc:
+        logger.warning("Could not apply schema at startup: %s", exc)
+    yield
+
+
+app = FastAPI(
+    title="GitHub Threat Detector Investigation API",
+    version="0.1.0",
+    lifespan=lifespan,
 )
+
+# The UI is served same-origin (Vite proxy in dev, static mount in prod), so
+# CORS is only needed when the UI is hosted elsewhere. Enable it explicitly:
+# CORS_ALLOW_ORIGINS=https://ui.example.com,https://other.example.com
+_cors_origins = [
+    o.strip() for o in os.environ.get("CORS_ALLOW_ORIGINS", "").split(",") if o.strip()
+]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 @app.get("/api/health")
 def health():
     return {"ok": True}
+
+
+# Triggers a background collect + analyze job (one at a time).
+@app.post("/api/run", status_code=202)
+def run_pipeline():
+    started = run.start_run()
+    return {"started": started, **run.get_status()}
+
+
+@app.get("/api/run/status")
+def run_status():
+    return run.get_status()
 
 
 @app.get("/api/orgs")
@@ -87,3 +131,10 @@ def timeline_compound(
     if row is None:
         raise HTTPException(status_code=404, detail="finding not found")
     return row
+
+
+# Production: serve the built UI from the same process (ui/dist exists after
+# `npm run build`). API routes above take precedence over the static mount.
+_UI_DIST = Path(__file__).resolve().parent.parent / "ui" / "dist"
+if _UI_DIST.is_dir():
+    app.mount("/", StaticFiles(directory=_UI_DIST, html=True), name="ui")

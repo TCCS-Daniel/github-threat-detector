@@ -79,6 +79,11 @@ cd ui && npm install && npm run dev
 
 Open http://127.0.0.1:5173 — see [`api/README.md`](api/README.md).
 
+The topbar's **Collect + Analyze** button triggers a background collect + analyze
+run over the configured repos/orgs (`POST /api/run`); set `RUN_COLLECTORS` to
+enable optional collectors for it (e.g. `RUN_COLLECTORS=commits,tags,activities`).
+The findings list refreshes automatically when the run finishes.
+
 ## Collectors
 
 | Collector           | CLI Flag           | Source                                                                                               | Data Stored                                                                                                                                                                                     |
@@ -257,6 +262,19 @@ CLI equivalent: `python cli.py collect --author-search` (after commits exist in 
 
 ## Deployment
 
+### Production (on-host)
+
+A single uvicorn process serves the API and the built investigation UI on
+port 8000, backed by the host's PostgreSQL. See [`DEPLOYMENT.md`](DEPLOYMENT.md)
+for the full setup and the systemd unit ([`deploy/threat-detector.service`](deploy/threat-detector.service)).
+
+```bash
+cd ui && npm ci && npm run build && cd ..
+uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+### AWS (webhook receiver + scheduled collectors)
+
 A SAM stack (`webhook/template.yaml`) runs the webhook receiver and the three scheduled collectors on AWS:
 
 | Component | Trigger | Purpose |
@@ -302,3 +320,5 @@ Apply `db/schema.sql` once after first deploy (collectors do not migrate schema)
 | `TARGET_REPOS`       | Lambda/stack target repos (preferred over `GITHUB_REPOS` in collector Lambdas)                                           |
 | `TARGET_ORGS`        | Lambda/stack target orgs (preferred over `GITHUB_ORGS` in collector Lambdas)                                             |
 | `TARGET_REPO_PREFIX` | Restrict org discovery to repos whose name starts with this prefix (e.g. `sim`; used when `--repo-prefix` is not passed) |
+| `RUN_COLLECTORS`     | Optional collectors for the UI's Collect + Analyze button (comma-separated CLI flag names, e.g. `commits,scan-parents,tags`) |
+| `CORS_ALLOW_ORIGINS` | Comma-separated origins allowed to call the API cross-origin (unset = same-origin only)                                  |

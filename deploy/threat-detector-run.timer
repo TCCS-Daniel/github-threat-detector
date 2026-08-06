@@ -1,0 +1,19 @@
+# Schedules the collect + analyze pipeline roughly every 5 hours
+# (00:00, 05:00, 10:00, 15:00, 20:00 — the 20:00→00:00 gap is 4h, keeping
+# every interval within the 4-6 hour target).
+# Install:
+#   cp deploy/threat-detector-run.{service,timer} /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now threat-detector-run.timer
+
+[Unit]
+Description=GitHub Threat Detector pipeline schedule (every 4-5 hours)
+
+[Timer]
+OnCalendar=*-*-* 00/5:00:00
+RandomizedDelaySec=10m
+Persistent=true
+Unit=threat-detector-run.service
+
+[Install]
+WantedBy=timers.target

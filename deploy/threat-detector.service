@@ -1,0 +1,26 @@
+# systemd unit for the GitHub Threat Detector API + UI.
+# Install:
+#   cp deploy/threat-detector.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now threat-detector
+# Adjust WorkingDirectory/ExecStart paths if the repo or venv lives elsewhere.
+
+[Unit]
+Description=GitHub Threat Detector (API + investigation UI)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/github-threat-detector
+# config.py loads .env from the working directory; EnvironmentFile is a
+# belt-and-braces so systemd restarts also see the variables.
+EnvironmentFile=-/opt/github-threat-detector/.env
+ExecStart=/usr/bin/env uvicorn api.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=3
+# Uncomment to bind a privileged port (e.g. --port 80) as a non-root user.
+#AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
