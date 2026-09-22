@@ -21,7 +21,10 @@ def list_org_repos(org: str, name_prefix: str | None = None) -> list[str]:
             name = repo.get("name", "")
             if not name or not _prefix_match(name, name_prefix):
                 continue
-            repos.append(f"{org}/{name}")
+            # Use GitHub's canonical full_name, not the configured org string:
+            # a case difference (e.g. "my-org" vs "My-Org") would otherwise
+            # split every repo's data under two spellings.
+            repos.append(repo.get("full_name") or f"{org}/{name}")
     return repos
 
 
