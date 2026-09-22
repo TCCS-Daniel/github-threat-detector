@@ -23,6 +23,15 @@ DEFAULT_ORGS: list[str] = [
 
 TARGET_REPO_PREFIX: str = os.environ.get("TARGET_REPO_PREFIX", "").strip()
 
+# Orgs still collected and analyzed, but hidden from the investigation UI's
+# default views (org/repo dropdowns and the unfiltered findings list).
+# Explicitly filtering on a hidden org (?org=...) still shows its data.
+HIDDEN_ORGS: list[str] = [
+    org.strip().lower()
+    for org in os.environ.get("HIDDEN_ORGS", "").split(",")
+    if org.strip()
+]
+
 GITHUB_API_BASE = "https://api.github.com"
 REQUEST_TIMEOUT = 30
 MAX_PAGES = 10

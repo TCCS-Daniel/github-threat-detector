@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from config import HIDDEN_ORGS
 from db.client import get_cursor
 from api.entities import extract_entities, finding_pin_ts
 
@@ -37,15 +38,24 @@ def _serialize_finding(row: dict[str, Any]) -> dict[str, Any]:
     return finding
 
 
+def _exclude_hidden_orgs(conditions: list[str], params: dict[str, Any]) -> None:
+    if HIDDEN_ORGS:
+        conditions.append("lower(split_part(repo_name, '/', 1)) != ALL(%(hidden_orgs)s)")
+        params["hidden_orgs"] = HIDDEN_ORGS
+
+
 def list_orgs() -> list[str]:
-    sql = """
+    conditions = ["repo_name LIKE '%%/%%'"]
+    params: dict[str, Any] = {}
+    _exclude_hidden_orgs(conditions, params)
+    sql = f"""
         SELECT DISTINCT split_part(repo_name, '/', 1) AS org
         FROM findings
-        WHERE repo_name LIKE '%/%'
+        WHERE {" AND ".join(conditions)}
         ORDER BY org
     """
     with get_cursor(dict_cursor=True) as cur:
-        cur.execute(sql)
+        cur.execute(sql, params)
         return [r["org"] for r in cur.fetchall() if r["org"]]
 
 
@@ -55,6 +65,8 @@ def list_repos(org: str | None = None) -> list[str]:
     if org:
         conditions.append("split_part(repo_name, '/', 1) = %(org)s")
         params["org"] = org
+    else:
+        _exclude_hidden_orgs(conditions, params)
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     sql = f"""
         SELECT DISTINCT repo_name
@@ -81,6 +93,10 @@ def list_findings(
     if repo:
         conditions.append("repo_name = %(repo)s")
         params["repo"] = repo
+    if not org and not repo:
+        # Hidden orgs stay out of the default view but remain reachable
+        # by filtering on them explicitly.
+        _exclude_hidden_orgs(conditions, params)
     if severity:
         conditions.append("severity = ANY(%(severity)s)")
         params["severity"] = severity
