@@ -8,6 +8,9 @@ import {
   fetchRelated,
   fetchRepoTimeline,
   fetchRepos,
+  fetchRunStatus,
+  startRun,
+  type RunStatus,
 } from './api'
 import { CorrelationGraph } from './CorrelationGraph'
 import type { EntityKey, Facet, Finding, RelatedResponse, Severity, TimelineResponse } from './types'
@@ -184,7 +187,44 @@ export default function App() {
   const [graphFullscreen, setGraphFullscreen] = useState(false)
   const [listW, setListW] = useState(DEFAULT_LIST_W)
   const [relatedW, setRelatedW] = useState(DEFAULT_RELATED_W)
+  const [run, setRun] = useState<RunStatus | null>(null)
+  const [refresh, setRefresh] = useState(0)
   const mainRef = useRef<HTMLDivElement>(null)
+
+  const running = run?.status === 'running'
+
+  async function triggerRun() {
+    try {
+      setError(null)
+      const status = await startRun()
+      setRun(status)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  // Pick up a job already in flight (e.g. after a page reload).
+  useEffect(() => {
+    fetchRunStatus()
+      .then((s) => {
+        if (s.status === 'running') setRun(s)
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!running) return
+    const t = window.setInterval(() => {
+      fetchRunStatus()
+        .then((s) => {
+          setRun(s)
+          if (s.status === 'done') setRefresh((n) => n + 1)
+          if (s.status === 'error') setError(`Collect + analyze failed: ${s.error}`)
+        })
+        .catch((e: Error) => setError(e.message))
+    }, 2000)
+    return () => window.clearInterval(t)
+  }, [running])
 
   useEffect(() => {
     if (!graphFullscreen) return
@@ -248,13 +288,13 @@ export default function App() {
     fetchOrgs()
       .then((r) => setOrgs(r.orgs))
       .catch((e: Error) => setError(e.message))
-  }, [])
+  }, [refresh])
 
   useEffect(() => {
     fetchRepos(org || undefined)
       .then((r) => setRepos(r.repos))
       .catch((e: Error) => setError(e.message))
-  }, [org])
+  }, [org, refresh])
 
   useEffect(() => {
     writeParams({
@@ -295,7 +335,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [org, repo, severity, since])
+  }, [org, repo, severity, since, refresh])
 
   useEffect(() => {
     if (selectedId == null) {
@@ -445,7 +485,34 @@ export default function App() {
     <>
     <div className="app">
       <header className="topbar">
-        <h1>Findings investigation</h1>
+        <h1 className="brand" aria-label="GitHub Threat Detector">
+          <svg
+            className="brand-mark"
+            viewBox="0 0 40 40"
+            role="img"
+            aria-hidden="true"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            {/* GitHub-style head: circle + cat ears */}
+            <circle cx="20" cy="20" r="13" fill="#5b66c4" />
+            <path d="M8.74,13.5 L9.5,5.5 L16.64,7.44 Z" fill="#5b66c4" />
+            <path d="M31.26,13.5 L30.5,5.5 L23.36,7.44 Z" fill="#5b66c4" />
+            {/* Claremont-style starburst cluster */}
+            <path
+              d="M20,11.8 L21.9,18.1 L28.2,20 L21.9,21.9 L20,28.2 L18.1,21.9 L11.8,20 L18.1,18.1 Z"
+              fill="#e0e5ec"
+            />
+            <path d="M24.5,12.9 L25.2,14.8 L27.1,15.5 L25.2,16.2 L24.5,18.1 L23.8,16.2 L21.9,15.5 L23.8,14.8 Z" fill="#aab3f0" />
+            <path d="M24.5,21.9 L25.2,23.8 L27.1,24.5 L25.2,25.2 L24.5,27.1 L23.8,25.2 L21.9,24.5 L23.8,23.8 Z" fill="#aab3f0" />
+            <path d="M15.5,21.9 L16.2,23.8 L18.1,24.5 L16.2,25.2 L15.5,27.1 L14.8,25.2 L12.9,24.5 L14.8,23.8 Z" fill="#aab3f0" />
+            <path d="M15.5,12.9 L16.2,14.8 L18.1,15.5 L16.2,16.2 L15.5,18.1 L14.8,16.2 L12.9,15.5 L14.8,14.8 Z" fill="#aab3f0" />
+            <path d="M20,17.6 L22.4,20 L20,22.4 L17.6,20 Z" fill="#2f3572" />
+          </svg>
+          <span className="brand-text">
+            <span className="brand-sub">The Claremont Colleges Services</span>
+            <span className="brand-name">GitHub Threat Detector</span>
+          </span>
+        </h1>
         <div className="field">
           <label htmlFor="org">Org</label>
           <select
@@ -510,6 +577,35 @@ export default function App() {
                 {s}
               </button>
             ))}
+          </div>
+        </div>
+        <div className="field run-field">
+          <label>Pipeline</label>
+          <div className="run-controls">
+            <button
+              type="button"
+              className={`run-btn${running ? ' running' : ''}`}
+              disabled={running}
+              onClick={triggerRun}
+              title="Collect events for the configured repos/orgs, then run all analyzers"
+            >
+              {running
+                ? run?.step === 'analyze'
+                  ? 'Analyzing…'
+                  : 'Collecting…'
+                : 'Collect + Analyze'}
+            </button>
+            {running && run?.detail ? (
+              <span className="run-note">{run.detail}</span>
+            ) : null}
+            {!running && run?.status === 'done' && run.result ? (
+              <span className="run-note ok">
+                ✓ {run.result.new_events ?? 0} events · {run.result.findings ?? 0} findings
+                {run.result.collect_errors
+                  ? ` · ${run.result.collect_errors} steps skipped`
+                  : ''}
+              </span>
+            ) : null}
           </div>
         </div>
         {error ? (

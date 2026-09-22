@@ -41,27 +41,32 @@ function worseSeverity(a: Severity, b: Severity): Severity {
 
 /** Keep in sync with --critical/--high/--medium/--low in index.css */
 const SEV_COLOR: Record<Severity, string> = {
-  critical: '#b42318',
-  high: '#c4320a',
-  medium: '#b54708',
-  low: '#175cd3',
+  critical: '#f85149',
+  high: '#f0883e',
+  medium: '#d29922',
+  low: '#58a6ff',
 }
+
+/** Canvas colors; keep in sync with --bg/--inset in index.css. */
+const CANVAS_BG = '#10151c'
+const CANVAS_INK = '#c9d1d9'
+const ICON_DETAIL = '#0d1117'
 
 /** Graph hubs only — repo is list-only (too broad / star topology). */
 const ENTITY_COLOR: Record<GraphEntity, string> = {
-  commit: '#24292f',
-  release: '#8250df',
-  tag: '#bf8700',
-  user: '#0969da',
-  workflow: '#1f883d',
+  commit: '#9198a1',
+  release: '#a371f7',
+  tag: '#d29922',
+  user: '#539bf5',
+  workflow: '#3fb950',
 }
 
 const FACET_LINK: Record<string, string> = {
-  commit: '#8c959f',
-  release: '#c4b1f0',
-  tag: '#d4a72c',
-  user: '#80b8f0',
-  workflow: '#7bc98a',
+  commit: '#545d68',
+  release: '#8250df',
+  tag: '#9e6a03',
+  user: '#316dca',
+  workflow: '#347d39',
 }
 
 /** Stronger IR pivots first; user is broad and creates star graphs. */
@@ -343,7 +348,7 @@ function drawCommitIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: 
   ctx.beginPath()
   ctx.arc(x, y, s * 0.28, 0, Math.PI * 2)
   ctx.fill()
-  ctx.strokeStyle = '#ffffff'
+  ctx.strokeStyle = ICON_DETAIL
   ctx.lineWidth = Math.max(1, s * 0.08)
   ctx.stroke()
 }
@@ -357,7 +362,7 @@ function drawTagIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: num
   ctx.lineTo(x - s * 0.38, y - s * 0.05)
   ctx.closePath()
   ctx.fill()
-  ctx.fillStyle = '#ffffff'
+  ctx.fillStyle = ICON_DETAIL
   ctx.beginPath()
   ctx.arc(x + s * 0.16, y - s * 0.22, s * 0.08, 0, Math.PI * 2)
   ctx.fill()
@@ -373,7 +378,7 @@ function drawReleaseIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s:
   ctx.lineTo(x - s * 0.38, y - s * 0.18)
   ctx.closePath()
   ctx.fill()
-  ctx.strokeStyle = '#ffffff'
+  ctx.strokeStyle = ICON_DETAIL
   ctx.lineWidth = Math.max(1, s * 0.07)
   ctx.beginPath()
   ctx.moveTo(x - s * 0.38, y - s * 0.18)
@@ -390,7 +395,7 @@ function drawWorkflowIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s
   ctx.beginPath()
   ctx.arc(x, y, s * 0.42, 0, Math.PI * 2)
   ctx.fill()
-  ctx.fillStyle = '#ffffff'
+  ctx.fillStyle = ICON_DETAIL
   ctx.beginPath()
   ctx.moveTo(x - s * 0.12, y - s * 0.22)
   ctx.lineTo(x + s * 0.26, y)
@@ -588,14 +593,14 @@ export function CorrelationGraph({
           graphData={data}
           width={size.w}
           height={size.h}
-          backgroundColor="#fbfcfd"
+          backgroundColor={CANVAS_BG}
           nodeId="id"
           linkColor={(link) => {
             const l = link as GraphLink
             const [s, t] = linkEnds(l)
             const dim = hot && !hot.has(s) && !hot.has(t)
-            const base = FACET_LINK[l.facet] || '#adb5bd'
-            return dim ? 'rgba(173,181,189,0.2)' : base
+            const base = FACET_LINK[l.facet] || '#6e7681'
+            return dim ? 'rgba(110,118,129,0.2)' : base
           }}
           linkWidth={(link) => {
             const l = link as GraphLink
@@ -639,10 +644,10 @@ export function CorrelationGraph({
               ctx.fill()
               ctx.lineWidth = (n.isFocus || n.isPinned ? 2.4 : 1.2) / globalScale
               ctx.strokeStyle = n.isFocus
-                ? '#087f5b'
+                ? '#3fb950'
                 : n.isPinned
-                  ? '#5f3dc4'
-                  : '#ffffff'
+                  ? '#a371f7'
+                  : CANVAS_BG
               ctx.stroke()
             } else if (n.kind === 'group') {
               const r = 11
@@ -657,9 +662,9 @@ export function CorrelationGraph({
               ctx.fillStyle = SEV_COLOR[n.severity || 'low']
               ctx.fill()
               ctx.lineWidth = 2 / globalScale
-              ctx.strokeStyle = '#ffffff'
+              ctx.strokeStyle = CANVAS_BG
               ctx.stroke()
-              ctx.fillStyle = '#ffffff'
+              ctx.fillStyle = ICON_DETAIL
               ctx.font = `bold ${Math.max(11 / globalScale, 3)}px "IBM Plex Sans", sans-serif`
               ctx.textAlign = 'center'
               ctx.textBaseline = 'middle'
@@ -679,7 +684,7 @@ export function CorrelationGraph({
             ctx.font = `${fontSize}px "IBM Plex Sans", sans-serif`
             ctx.textAlign = 'center'
             ctx.textBaseline = 'top'
-            ctx.fillStyle = '#212529'
+            ctx.fillStyle = CANVAS_INK
             const max = n.kind === 'group' ? 26 : n.kind === 'finding' ? 20 : 22
             const labelY = n.kind === 'group' ? 14 : n.kind === 'finding' ? 9 : 12
             ctx.fillText(shortLabel(n.label, max), x, y + labelY)
