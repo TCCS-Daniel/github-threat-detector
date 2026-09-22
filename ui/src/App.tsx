@@ -9,11 +9,12 @@ import {
   fetchRepoTimeline,
   fetchRepos,
   fetchRunStatus,
+  setFindingStatus,
   startRun,
   type RunStatus,
 } from './api'
 import { CorrelationGraph } from './CorrelationGraph'
-import type { EntityKey, Facet, Finding, RelatedResponse, Severity, TimelineResponse } from './types'
+import type { EntityKey, Facet, Finding, FindingStatus, RelatedResponse, Severity, TimelineResponse } from './types'
 
 const LIST_FACETS: EntityKey[] = ['commit', 'release', 'tag', 'user', 'workflow', 'repo']
 const DEFAULT_LIST_W = 300
@@ -23,6 +24,7 @@ const MIN_DETAIL_W = 240
 const MIN_RELATED_W = 260
 
 const SEVERITIES: Severity[] = ['critical', 'high', 'medium', 'low']
+const STATUSES: FindingStatus[] = ['open', 'acknowledged', 'escalated', 'dismissed']
 const WINDOW_OPTIONS = [1, 7, 14, 30]
 const SINCE_OPTIONS = ['15m', '1h', '4h', '1d', '7d'] as const
 type SinceOption = (typeof SINCE_OPTIONS)[number] | ''
@@ -31,6 +33,9 @@ function readParams() {
   const sp = new URLSearchParams(window.location.search)
   const severity = sp.getAll('severity').filter((s): s is Severity =>
     SEVERITIES.includes(s as Severity),
+  )
+  const status = sp.getAll('status').filter((s): s is FindingStatus =>
+    STATUSES.includes(s as FindingStatus),
   )
   const sinceRaw = sp.get('since') || ''
   const since = (SINCE_OPTIONS as readonly string[]).includes(sinceRaw)
@@ -43,6 +48,7 @@ function readParams() {
     f2: sp.get('f2') ? Number(sp.get('f2')) : null,
     window_days: Number(sp.get('window_days') || 7) || 7,
     severity,
+    status,
     since,
   }
 }
@@ -54,6 +60,7 @@ function writeParams(state: {
   f2: number | null
   window_days: number
   severity: Severity[]
+  status: FindingStatus[]
   since: SinceOption
 }) {
   const sp = new URLSearchParams()
@@ -64,6 +71,7 @@ function writeParams(state: {
   if (state.f2 != null) sp.set('f2', String(state.f2))
   if (state.window_days !== 7) sp.set('window_days', String(state.window_days))
   for (const s of state.severity) sp.append('severity', s)
+  for (const s of state.status) sp.append('status', s)
   const q = sp.toString()
   const next = q ? `?${q}` : window.location.pathname
   window.history.replaceState(null, '', next)
@@ -85,6 +93,9 @@ function FindingMeta({ f }: { f: Finding }) {
       <span className={`badge sev-${f.severity}`}>{f.severity}</span>
       <span>{f.rule_id}</span>
       {f.is_candidate ? <span className="badge candidate">candidate</span> : null}
+      {f.status && f.status !== 'open' ? (
+        <span className={`badge status-${f.status}`}>{f.status}</span>
+      ) : null}
     </div>
   )
 }
@@ -168,7 +179,10 @@ export default function App() {
   const [org, setOrg] = useState(initial.org)
   const [repo, setRepo] = useState(initial.repo)
   const [severity, setSeverity] = useState<Severity[]>(initial.severity)
+  const [status, setStatus] = useState<FindingStatus[]>(initial.status)
   const [since, setSince] = useState<SinceOption>(initial.since)
+  const [statusNote, setStatusNote] = useState('')
+  const [statusBusy, setStatusBusy] = useState(false)
   const [findings, setFindings] = useState<Finding[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(initial.f1)
   const [selected, setSelected] = useState<Finding | null>(null)
@@ -304,9 +318,10 @@ export default function App() {
       f2: pinB,
       window_days: windowDays,
       severity,
+      status,
       since,
     })
-  }, [org, repo, selectedId, pinB, windowDays, severity, since])
+  }, [org, repo, selectedId, pinB, windowDays, severity, status, since])
 
   useEffect(() => {
     let cancelled = false
@@ -317,6 +332,7 @@ export default function App() {
       repo: repo || undefined,
       severity: severity.length ? severity : undefined,
       since: since || undefined,
+      status: status.length ? status : undefined,
     })
       .then((r) => {
         if (cancelled) return
@@ -335,7 +351,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [org, repo, severity, since, refresh])
+  }, [org, repo, severity, status, since, refresh])
 
   useEffect(() => {
     if (selectedId == null) {
@@ -421,10 +437,30 @@ export default function App() {
     return hideCandidates ? withoutCandidates(related) : related
   }, [related, hideCandidates])
 
-  const filtersActive = Boolean(org || repo || severity.length || since)
+  const filtersActive = Boolean(org || repo || severity.length || status.length || since)
 
   function toggleSeverity(s: Severity) {
     setSeverity((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]))
+  }
+
+  function toggleStatus(s: FindingStatus) {
+    setStatus((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]))
+  }
+
+  async function triageSelected(next: FindingStatus) {
+    if (!selected || statusBusy) return
+    setStatusBusy(true)
+    try {
+      setError(null)
+      const updated = await setFindingStatus(selected.id, next, statusNote.trim() || undefined)
+      setSelected(updated)
+      setStatusNote('')
+      setFindings((prev) => prev.map((f) => (f.id === updated.id ? { ...f, ...updated } : f)))
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setStatusBusy(false)
+    }
   }
 
   function clearFilters() {
@@ -558,6 +594,22 @@ export default function App() {
           </div>
         </div>
         <div className="field">
+          <label>Status</label>
+          <div className="sev-filters">
+            {STATUSES.map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={status.includes(s) ? 'on' : ''}
+                onClick={() => toggleStatus(s)}
+                title={s === 'dismissed' ? 'Dismissed findings are hidden unless selected' : undefined}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="field">
           <label>Time</label>
           <div className="sev-filters">
             <button
@@ -679,8 +731,51 @@ export default function App() {
                 <h3>{selected.rule_id}</h3>
                 <span className={`badge sev-${selected.severity}`}>{selected.severity}</span>
                 {selected.is_candidate ? <span className="badge candidate">candidate</span> : null}
+                {selected.status && selected.status !== 'open' ? (
+                  <span className={`badge status-${selected.status}`}>{selected.status}</span>
+                ) : null}
               </div>
               <p className="detail-desc">{selected.description}</p>
+              <div className="triage">
+                <div className="triage-actions">
+                  {selected.status !== 'acknowledged' ? (
+                    <button type="button" disabled={statusBusy} onClick={() => triageSelected('acknowledged')}>
+                      Acknowledge
+                    </button>
+                  ) : null}
+                  {selected.status !== 'escalated' ? (
+                    <button type="button" className="danger" disabled={statusBusy} onClick={() => triageSelected('escalated')}>
+                      Escalate
+                    </button>
+                  ) : null}
+                  {selected.status !== 'dismissed' ? (
+                    <button type="button" disabled={statusBusy} onClick={() => triageSelected('dismissed')}>
+                      Dismiss
+                    </button>
+                  ) : null}
+                  {selected.status && selected.status !== 'open' ? (
+                    <button type="button" disabled={statusBusy} onClick={() => triageSelected('open')}>
+                      Reopen
+                    </button>
+                  ) : null}
+                </div>
+                <input
+                  type="text"
+                  placeholder="Optional note (why acknowledged / dismissed / escalated)"
+                  value={statusNote}
+                  onChange={(e) => setStatusNote(e.target.value)}
+                />
+                {selected.status_note || selected.status_updated_at ? (
+                  <div className="triage-note">
+                    {selected.status_note ? <span>“{selected.status_note}”</span> : null}
+                    {selected.status_updated_at ? (
+                      <span className="triage-when">
+                        {selected.status} {new Date(selected.status_updated_at).toLocaleString()}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
               <div className="chips">
                 {LIST_FACETS.map((key) => {
                   const value = selected.entities[key]

@@ -561,6 +561,90 @@ body.resizing-cols {
   font-weight: 600;
 }
 
+.badge.status-acknowledged {
+  background: rgba(88, 166, 255, 0.18);
+  color: #79b8ff;
+  font-weight: 600;
+}
+.badge.status-escalated {
+  background: rgba(248, 81, 73, 0.2);
+  color: #ff7b72;
+  font-weight: 600;
+}
+.badge.status-dismissed {
+  background: rgba(145, 152, 161, 0.18);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.triage {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.25rem 0 0.75rem;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--inset);
+}
+
+.triage-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.triage-actions button {
+  border: 1px solid var(--line);
+  background: var(--raised);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.triage-actions button:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+
+.triage-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.triage-actions button.danger {
+  border-color: rgba(248, 81, 73, 0.5);
+  color: #ff7b72;
+}
+
+.triage input {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.78rem;
+  color: var(--ink);
+  font-family: var(--font);
+}
+
+.triage input::placeholder {
+  color: var(--muted);
+}
+
+.triage-note {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  font-size: 0.75rem;
+  color: var(--ink);
+}
+
+.triage-note .triage-when {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .empty {
   color: var(--muted);
   font-size: 0.9rem;

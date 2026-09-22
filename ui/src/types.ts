@@ -1,5 +1,7 @@
 export type Severity = 'critical' | 'high' | 'medium' | 'low'
 
+export type FindingStatus = 'open' | 'acknowledged' | 'dismissed' | 'escalated'
+
 export type EntityKey = 'repo' | 'user' | 'tag' | 'workflow' | 'commit' | 'release'
 
 export type Entities = {
@@ -22,6 +24,9 @@ export type Finding = {
   description: string
   evidence: Record<string, unknown>
   is_candidate: boolean
+  status: FindingStatus
+  status_note: string | null
+  status_updated_at: string | null
   created_at: string
   entities: Entities
 }

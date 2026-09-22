@@ -3,9 +3,12 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from api import queries, run
 
@@ -79,15 +82,40 @@ def findings(
     repo: str | None = None,
     severity: list[str] | None = Query(default=None),
     since: str | None = Query(default=None, description="Relative window: 15m, 1h, 4h, 1d, 7d"),
+    status: list[str] | None = Query(default=None, description="Triage statuses to include; default = all but dismissed"),
 ):
+    if status:
+        bad = [s for s in status if s not in queries.STATUS_CHOICES]
+        if bad:
+            raise HTTPException(status_code=422, detail=f"invalid status: {bad}")
     try:
         return {
             "findings": queries.list_findings(
-                org=org, repo=repo, severity=severity, since=since
+                org=org, repo=repo, severity=severity, since=since, status=status
             )
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class StatusUpdate(BaseModel):
+    status: str
+    note: str | None = None
+
+
+# Triage: acknowledge / dismiss / escalate (or reopen) a finding.
+@app.post("/api/findings/{finding_id}/status")
+def finding_set_status(finding_id: int, update: StatusUpdate):
+    if update.status not in queries.STATUS_CHOICES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"status must be one of {list(queries.STATUS_CHOICES)}",
+        )
+    note = (update.note or "").strip() or None
+    row = queries.set_finding_status(finding_id, update.status, note)
+    if row is None:
+        raise HTTPException(status_code=404, detail="finding not found")
+    return row
 
 
 @app.get("/api/findings/{finding_id}")
@@ -129,3 +157,10 @@ def timeline_compound(
     if row is None:
         raise HTTPException(status_code=404, detail="finding not found")
     return row
+
+
+# Production: serve the built UI from the same process (ui/dist exists after
+# `npm run build`). API routes above take precedence over the static mount.
+_UI_DIST = Path(__file__).resolve().parent.parent / "ui" / "dist"
+if _UI_DIST.is_dir():
+    app.mount("/", StaticFiles(directory=_UI_DIST, html=True), name="ui")

@@ -147,6 +147,10 @@ CREATE TABLE IF NOT EXISTS findings (
     description TEXT NOT NULL,
     evidence JSONB,
     is_candidate BOOLEAN NOT NULL DEFAULT false,
+    status TEXT NOT NULL DEFAULT 'open'
+        CHECK (status IN ('open', 'acknowledged', 'dismissed', 'escalated')),
+    status_note TEXT,
+    status_updated_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -159,6 +163,21 @@ BEGIN
         ALTER TABLE findings ADD COLUMN is_candidate BOOLEAN NOT NULL DEFAULT false;
     END IF;
 END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'findings' AND column_name = 'status'
+    ) THEN
+        ALTER TABLE findings ADD COLUMN status TEXT NOT NULL DEFAULT 'open'
+            CHECK (status IN ('open', 'acknowledged', 'dismissed', 'escalated'));
+        ALTER TABLE findings ADD COLUMN status_note TEXT;
+        ALTER TABLE findings ADD COLUMN status_updated_at TIMESTAMPTZ;
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_findings_status ON findings(status);
 
 CREATE INDEX IF NOT EXISTS idx_findings_rule ON findings(rule_id);
 CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);

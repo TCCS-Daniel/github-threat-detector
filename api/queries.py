@@ -10,6 +10,7 @@ from api.entities import extract_entities, finding_pin_ts
 SEVERITY_ORDER = "CASE severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5 END"
 RELATED_CAP = 20
 SINCE_CHOICES = ("15m", "1h", "4h", "1d", "7d")
+STATUS_CHOICES = ("open", "acknowledged", "dismissed", "escalated")
 
 
 def parse_since(since_str: str | None) -> datetime | None:
@@ -32,6 +33,8 @@ def _serialize_finding(row: dict[str, Any]) -> dict[str, Any]:
     finding = dict(row)
     if finding.get("created_at") is not None:
         finding["created_at"] = finding["created_at"].isoformat()
+    if finding.get("status_updated_at") is not None:
+        finding["status_updated_at"] = finding["status_updated_at"].isoformat()
     if finding.get("evidence") is None:
         finding["evidence"] = {}
     finding["entities"] = extract_entities(finding)
@@ -84,6 +87,7 @@ def list_findings(
     repo: str | None = None,
     severity: list[str] | None = None,
     since: str | None = None,
+    status: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     conditions = []
     params: dict[str, Any] = {}
@@ -100,6 +104,12 @@ def list_findings(
     if severity:
         conditions.append("severity = ANY(%(severity)s)")
         params["severity"] = severity
+    if status:
+        conditions.append("status = ANY(%(status)s)")
+        params["status"] = status
+    else:
+        # Dismissed findings stay out of the list unless asked for.
+        conditions.append("status != 'dismissed'")
     since_dt = parse_since(since)
     if since_dt is not None:
         conditions.append("created_at >= %(since)s")
@@ -107,7 +117,8 @@ def list_findings(
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     sql = f"""
         SELECT id, rule_id, severity, repo_name, actor_login, event_id,
-               description, evidence, is_candidate, created_at
+               description, evidence, is_candidate, status, status_note,
+               status_updated_at, created_at
         FROM findings
         {where}
         ORDER BY {SEVERITY_ORDER}, created_at DESC, id DESC
@@ -117,10 +128,36 @@ def list_findings(
         return [_serialize_finding(dict(r)) for r in cur.fetchall()]
 
 
+def set_finding_status(
+    finding_id: int,
+    status: str,
+    note: str | None = None,
+) -> dict[str, Any] | None:
+    if status not in STATUS_CHOICES:
+        raise ValueError(f"status must be one of {STATUS_CHOICES}")
+    sql = """
+        UPDATE findings
+           SET status = %(status)s,
+               status_note = %(note)s,
+               status_updated_at = now()
+         WHERE id = %(id)s
+        RETURNING id, rule_id, severity, repo_name, actor_login, event_id,
+                  description, evidence, is_candidate, status, status_note,
+                  status_updated_at, created_at
+    """
+    with get_cursor(dict_cursor=True) as cur:
+        cur.execute(sql, {"id": finding_id, "status": status, "note": note})
+        row = cur.fetchone()
+        if not row:
+            return None
+        return _serialize_finding(dict(row))
+
+
 def get_finding(finding_id: int) -> dict[str, Any] | None:
     sql = """
         SELECT id, rule_id, severity, repo_name, actor_login, event_id,
-               description, evidence, is_candidate, created_at
+               description, evidence, is_candidate, status, status_note,
+               status_updated_at, created_at
         FROM findings
         WHERE id = %(id)s
     """
@@ -201,7 +238,8 @@ def _peer_rows(
     count_sql = f"SELECT count(*) AS n FROM findings WHERE {where}"
     list_sql = f"""
         SELECT id, rule_id, severity, repo_name, actor_login, event_id,
-               description, evidence, is_candidate, created_at
+               description, evidence, is_candidate, status, status_note,
+               status_updated_at, created_at
         FROM findings
         WHERE {where}
         ORDER BY {SEVERITY_ORDER}, created_at DESC, id DESC

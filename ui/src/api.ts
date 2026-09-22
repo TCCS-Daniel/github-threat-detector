@@ -1,4 +1,4 @@
-import type { Finding, RelatedResponse, Severity, TimelineResponse } from './types'
+import type { Finding, FindingStatus, RelatedResponse, Severity, TimelineResponse } from './types'
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init)
@@ -51,14 +51,24 @@ export function fetchFindings(params: {
   repo?: string
   severity?: Severity[]
   since?: string
+  status?: FindingStatus[]
 }) {
   const sp = new URLSearchParams()
   if (params.org) sp.set('org', params.org)
   if (params.repo) sp.set('repo', params.repo)
   if (params.since) sp.set('since', params.since)
   for (const s of params.severity || []) sp.append('severity', s)
+  for (const s of params.status || []) sp.append('status', s)
   const q = sp.toString()
   return getJson<{ findings: Finding[] }>(`/api/findings${q ? `?${q}` : ''}`)
+}
+
+export function setFindingStatus(id: number, status: FindingStatus, note?: string) {
+  return requestJson<Finding>(`/api/findings/${id}/status`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, note: note || null }),
+  })
 }
 
 export function fetchFinding(id: number) {
